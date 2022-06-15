@@ -1,0 +1,8 @@
+.idea/
+
+/target
+/Cargo.lock
+
+venv/
+__pycache__/
+*.so
