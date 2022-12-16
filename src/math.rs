@@ -1,3 +1,9 @@
+/// This module contains the functions used for fitting the negative binomial
+/// generalized linear model. Most of this module was derived directly from the
+/// R/R-math source code written in C. The lack of documentation in the source
+/// code can be attributed to the original source code. However, explanations of
+/// the mathematical reasoning behind the code are provided in R's excellent
+/// [documentation here](https://cran.r-project.org/web/packages/DPQ/vignettes/log1pmx-etc.pdf).
 use statrs::function::gamma::ln_gamma;
 
 const M_LN_SQRT_2PI: f64 = 0.918938533204672741780329736406;
