@@ -2,6 +2,7 @@ use numpy::{PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::prelude::{pymodule, PyModule, PyResult, Python};
 
 mod alg;
+mod math;
 
 // NOTE
 // * numpy defaults to np.float64, if you use other type than f64 in Rust you
@@ -48,14 +49,14 @@ fn deseq2_rs_py(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     ) {
         // Simple demonstration of creating an ndarray inside Rust and return
         let array = alg::fit_beta(
-            y.as_array(),
-            x.as_array(),
-            normalization_factors.as_array(),
-            alpha_hat.as_array(),
-            contrast.as_array(),
-            beta_matrix.as_array(),
-            lambda.as_array(),
-            weights.as_array(),
+            y.as_matrix(),
+            x.as_matrix(),
+            normalization_factors.as_matrix(),
+            alpha_hat.as_matrix(),
+            contrast.as_matrix(),
+            beta_matrix.as_matrix(),
+            lambda.as_matrix(),
+            weights.as_matrix(),
             use_weights,
             tolerance,
             max_iterations,
