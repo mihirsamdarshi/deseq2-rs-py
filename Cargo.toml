@@ -5,9 +5,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+pyo3 = { version = "0.17.3", features = ["extension-module"] }
 ndarray = "^0.15.3"
 numpy = { git = "https://github.com/PyO3/rust-numpy.git", features = ["nalgebra"] }
 rand = "^0.8.5" # Specific for this example
@@ -16,8 +17,7 @@ nalgebra = { version = "0.31.4" }
 nalgebra-glm = "0.17.0"
 num-traits = "0.2.15"
 statrs = "0.16.0"
+rayon = "1.6.1"
 
-[dependencies.pyo3]
-version = "0.17.3"
-features = ["extension-module"]
-
+[package.metadata.maturin]
+name = "deseq2_rs_py._internal"

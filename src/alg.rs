@@ -1,11 +1,14 @@
 use std::fmt::Debug;
 
-use nalgebra::{DMatrix, DMatrixSlice, DVector, Dynamic, Matrix, Scalar, LU};
+use nalgebra::{
+    DMatrix, DMatrixSlice, DVector, Dim, Dynamic, Matrix, OMatrix, Scalar, Storage, LU,
+};
 use num_traits::Zero;
 
 use crate::math::rf_dnbinom_mu;
 
 /// Fit beta coefficients for negative binomial GLM
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn fit_beta(
     y: DMatrixSlice<'_, f64, Dynamic, Dynamic>,
     x: DMatrixSlice<'_, f64, Dynamic, Dynamic>,
@@ -38,9 +41,6 @@ pub fn fit_beta(
     let mut iter = vec![0; y_n];
     let mut deviance = vec![0.0; y_n];
 
-    let mut w_vec;
-    let mut w_sqrt_vec;
-
     let large = 30.0;
 
     for i in 0..y_n {
@@ -48,7 +48,7 @@ pub fn fit_beta(
         let yrow = y.row(i).transpose();
         let beta_hat = beta_matrix.row(i).transpose();
 
-        let mut mu_hat = nfrow.component_mul(&((x * &beta_hat).map(|x| x.exp())));
+        let mut mu_hat = nfrow.component_mul(&((x * &beta_hat).map(f64::exp)));
         mu_hat.rows_range_mut(0..y_m).apply(|x| {
             if *x < min_mu {
                 *x = min_mu;
@@ -60,39 +60,32 @@ pub fn fit_beta(
         let ridge = Matrix::from_diagonal(&lambda);
         let mut dev = 0.0;
         let mut dev_old = 0.0;
+        let mut num_iterations = 0;
 
         for t in 0..max_iterations {
-            iter[i] += 1;
-            (w_vec, w_sqrt_vec) = get_weights(use_weights, weights, i, &mu_hat, alpha_hat);
-            let mut x_wvec = x.clone_owned();
-            for mut col in x_wvec.column_iter_mut() {
-                col.component_mul_assign(&w_sqrt_vec);
-            }
-            let ridge_sqrt = ridge.map(|x| x.sqrt());
+            let (w_vec, w_sqrt_vec) = get_weights(use_weights, weights, i, &mu_hat, alpha_hat);
+            let x_wvec = multiply_each_column(&x, &w_sqrt_vec);
+            let ridge_sqrt = ridge.map(f64::sqrt);
             let weighted_x_ridge = join_matrix_cols(&x_wvec, &ridge_sqrt);
             let (q, r) = weighted_x_ridge.qr().unpack();
 
             let mut big_w_diag = w_vec.clone();
             big_w_diag.resize_vertically_mut(y_m + x_p, 1.0);
 
-            let z = (mu_hat.component_div(&nfrow) + (&yrow - &mu_hat)).component_div(&mu_hat);
-
-            let mut z_sqrt_w = z.clone_owned();
-            for mut col in z_sqrt_w.column_iter_mut() {
-                col.component_mul_assign(&w_vec);
-            }
-
+            let z_sqrt_w = multiply_each_column(
+                &(mu_hat.component_div(&nfrow) + (&yrow - &mu_hat)).component_div(&mu_hat),
+                &w_vec,
+            );
             let mut big_z_sqrt_w = z_sqrt_w.clone();
             big_z_sqrt_w.resize_vertically_mut(y_m + x_p, 0.0);
 
             let gamma_hat = q * big_z_sqrt_w;
 
-            let beta_hat = match LU::new(r).solve(&gamma_hat) {
-                Some(x) => x,
-                None => {
-                    eprintln!("Unable to solve for beta_hat");
-                    beta_hat.clone()
-                }
+            let beta_hat = if let Some(x) = LU::new(r).solve(&gamma_hat) {
+                x
+            } else {
+                eprintln!("Unable to solve for beta_hat");
+                beta_hat.clone()
             };
 
             if beta_hat
@@ -101,7 +94,7 @@ pub fn fit_beta(
                 > 0.0
             {
                 eprintln!("beta_hat is zero");
-                iter[i] = max_iterations;
+                num_iterations = max_iterations;
                 break;
             }
 
@@ -111,20 +104,19 @@ pub fn fit_beta(
             for j in 0..y_m {
                 // note the order for Rf_dnbinom_mu: x, sz, mu, lg
                 if use_weights {
-                    dev = dev
-                        + -2.0
-                            * weights[(i, j)]
-                            * rf_dnbinom_mu(yrow[j], 1.0 / alpha_hat[i], mu_hat[j], true);
+                    dev += -2.0
+                        * weights[(i, j)]
+                        * rf_dnbinom_mu(yrow[j], 1.0 / alpha_hat[i], mu_hat[j], true);
                 } else {
-                    dev = dev + -2.0 * rf_dnbinom_mu(yrow[j], 1.0 / alpha_hat[i], mu_hat[j], true);
+                    dev += -2.0 * rf_dnbinom_mu(yrow[j], 1.0 / alpha_hat[i], mu_hat[j], true);
                 }
             }
 
             let conv_test = (dev - dev_old).abs() / (dev.abs() + 0.1);
 
-            if conv_test == f64::NAN {
+            if conv_test.is_nan() {
                 eprintln!("deviance is NAN");
-                iter[i] = max_iterations;
+                num_iterations = max_iterations;
                 break;
             }
 
@@ -134,25 +126,20 @@ pub fn fit_beta(
             dev_old = dev;
         }
 
+        iter[i] = num_iterations;
         deviance[i] = dev;
         beta_matrix.set_row(i, &beta_hat.transpose());
         // recalculate w so that this is identical if we start with beta_hat
-        (w_vec, w_sqrt_vec) = get_weights(use_weights, weights, i, &mu_hat, alpha_hat);
+        let (w_vec, w_sqrt_vec) = get_weights(use_weights, weights, i, &mu_hat, alpha_hat);
 
         // arma::mat xw = x.each_col() % w_sqrt_vec;
-        let mut xw = x.clone_owned();
-        for mut col in xw.column_iter_mut() {
-            col.component_mul_assign(&w_sqrt_vec);
-        }
-
-        let mut xsw = x.clone_owned();
-        for mut col in xsw.column_iter_mut() {
-            col.component_mul_assign(&w_vec);
-        }
+        let xw = multiply_each_column(&x, &w_sqrt_vec);
+        let xsw = multiply_each_column(&x, &w_vec);
         // arma::mat xtwxr_inv = (x.t() * (x.each_col() % w_vec) + ridge).i();
         let xtwxr_inv = ((x.transpose() * &xsw) + &ridge)
             .try_inverse()
             .expect("Unable to invert matrix");
+
         let hat_matrix_diag = (&xw * xtwxr_inv * xw.transpose()).diagonal();
 
         hat_diagonals.set_row(i, &hat_matrix_diag.transpose());
@@ -166,7 +153,7 @@ pub fn fit_beta(
         contrast_num.set_row(i, &(contrast.transpose() * beta_hat));
         contrast_denom.set_row(
             i,
-            &(contrast.transpose() * &sigma * contrast).map(|x| x.sqrt()),
+            &(contrast.transpose() * &sigma * contrast).map(f64::sqrt),
         );
         beta_var_matrix.set_row(i, &sigma.diagonal().transpose());
     }
@@ -182,6 +169,20 @@ pub fn fit_beta(
     }
 }
 
+fn multiply_each_column<C: Dim, S>(
+    a: &Matrix<f64, Dynamic, C, S>,
+    b: &DVector<f64>,
+) -> OMatrix<f64, Dynamic, C>
+where
+    S: Storage<f64, Dynamic, C>,
+{
+    let mut c = a.clone_owned();
+    for mut col in c.column_iter_mut() {
+        col.component_mul_assign(b);
+    }
+    c
+}
+
 #[allow(dead_code)]
 pub struct FitBetaResult {
     beta_matrix: DMatrix<f64>,
@@ -193,6 +194,7 @@ pub struct FitBetaResult {
     deviance: Vec<f64>,
 }
 
+/// Concatenates two matrices by columns
 fn join_matrix_cols<T: Copy + Debug + Scalar + Zero>(a: &DMatrix<T>, b: &DMatrix<T>) -> DMatrix<T> {
     let mut c = DMatrix::zeros(a.nrows(), a.ncols() + b.ncols());
     c.fixed_columns_mut::<1>(0).copy_from(a);
@@ -218,7 +220,7 @@ fn get_weights(
                     .add_scalar(1.0),
             ),
         );
-        let w_sqrt_vec = w_vec.map(|x| x.sqrt());
+        let w_sqrt_vec = w_vec.map(f64::sqrt);
         (w_vec, w_sqrt_vec)
     } else {
         let w_vec = mu_hat.component_div(
@@ -229,7 +231,7 @@ fn get_weights(
                 * mu_hat)
                 .add_scalar(1.0)),
         );
-        let w_sqrt_vec = w_vec.map(|x| x.sqrt());
+        let w_sqrt_vec = w_vec.map(f64::sqrt);
         (w_vec, w_sqrt_vec)
     };
 }

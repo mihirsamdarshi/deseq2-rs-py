@@ -6,10 +6,10 @@
 /// [documentation here](https://cran.r-project.org/web/packages/DPQ/vignettes/log1pmx-etc.pdf).
 use statrs::function::gamma::ln_gamma;
 
-const M_LN_SQRT_2PI: f64 = 0.918938533204672741780329736406;
-const M_LN_2PI: f64 = 1.837877066409345483560659472811;
+const M_LN_SQRT_2PI: f64 = 0.918_938_533_204_672_8;
+const M_LN_2PI: f64 = 1.837_877_066_409_345_6;
 
-macro_rules! R_D_exp {
+macro_rules! r_d_exp {
     ($log_p:ident, $x:expr) => {
         if $log_p {
             $x
@@ -19,7 +19,7 @@ macro_rules! R_D_exp {
     };
 }
 
-macro_rules! R_D__1 {
+macro_rules! r_d_1 {
     ($log_p:ident) => {
         if $log_p {
             0.0
@@ -29,7 +29,7 @@ macro_rules! R_D__1 {
     };
 }
 
-macro_rules! R_D__0 {
+macro_rules! r_d_0 {
     ($log_p:ident) => {
         if $log_p {
             f64::NEG_INFINITY
@@ -39,6 +39,7 @@ macro_rules! R_D__0 {
     };
 }
 
+#[allow(clippy::excessive_precision, clippy::unreadable_literal)]
 fn stirlerr(n: f64) -> f64 {
     const S0: f64 = 0.083333333333333333333; /* 1/12 */
     const S1: f64 = 0.00277777777777777777778; /* 1/360 */
@@ -87,13 +88,14 @@ fn stirlerr(n: f64) -> f64 {
     if n <= 15.0 {
         nn = n + n;
         if nn.fract() == 0.0 {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             return SFERR_HALVES[nn as usize];
         };
         return ln_gamma(n + 1.0) - (n + 0.5) * n.ln() + n - M_LN_SQRT_2PI;
     }
 
     nn = n * n;
-    return if n > 500.0 {
+    if n > 500.0 {
         (S0 - S1 / nn) / n
     } else if n > 80.0 {
         (S0 - (S1 - S2 / nn) / nn) / n
@@ -102,7 +104,7 @@ fn stirlerr(n: f64) -> f64 {
     } else {
         /* 15 < n <= 35 : */
         (S0 - (S1 - (S2 - (S3 - S4 / nn) / nn) / nn) / nn) / n
-    };
+    }
 }
 
 fn bd0(x: f64, np: f64) -> f64 {
@@ -119,8 +121,8 @@ fn bd0(x: f64, np: f64) -> f64 {
             as |v| < .1,  v^2000 is "zero" */
             ej *= v; // = 2 x v^(2j+1)
             let s_ = s;
-            s += ej / ((j << 1) + 1) as f64;
-            if s == s_ {
+            s += ej / f64::from((j << 1) + 1);
+            if (s - s_).abs() < f64::EPSILON {
                 eprintln!("bd0({x}, {np}): T.series w/ {j} terms -> bd0={s}");
                 /* last term was effectively 0 */
                 return s;
@@ -128,51 +130,51 @@ fn bd0(x: f64, np: f64) -> f64 {
         }
         eprintln!(
             "bd0({x}, {np}): T.series failed to converge in 1000 it.; s={s}, ej/(2j+1)={}",
-            ej / ((1000 << 1) + 1) as f64,
+            ej / f64::from((1000 << 1) + 1),
         );
     }
     /* else:  | x - np |  is not too small */
-    return x * (x / np).ln() + np - x;
+    x * (x / np).ln() + np - x
 }
 
 fn dbinom_raw(x: f64, n: f64, p: f64, q: f64, log_p: bool) -> f64 {
     if p == 0.0 {
         return if x == 0.0 {
-            R_D__1!(log_p)
+            r_d_1!(log_p)
         } else {
-            R_D__0!(log_p)
+            r_d_0!(log_p)
         };
     };
     if q == 0.0 {
-        return if x == n {
-            R_D__1!(log_p)
+        return if (x - n).abs() < f64::EPSILON {
+            r_d_1!(log_p)
         } else {
-            R_D__0!(log_p)
+            r_d_0!(log_p)
         };
     };
 
     let lc;
     if x == 0.0 {
         if n == 0.0 {
-            return R_D__1!(log_p);
+            return r_d_1!(log_p);
         };
         lc = if p < 0.1 {
             -bd0(n, n * q) - n * p
         } else {
             n * q.ln()
         };
-        return R_D_exp!(log_p, lc);
+        return r_d_exp!(log_p, lc);
     }
-    if x == n {
+    if (x - n).abs() < f64::EPSILON {
         lc = if q < 0.1 {
             -bd0(n, n * p) - n * q
         } else {
             n * p.ln()
         };
-        return R_D_exp!(log_p, lc);
+        return r_d_exp!(log_p, lc);
     }
     if x < 0.0 || x > n {
-        return R_D__0!(log_p);
+        return r_d_0!(log_p);
     };
 
     /* n*p or n*q can underflow to zero if n and p or q are small.  This
@@ -185,7 +187,7 @@ fn dbinom_raw(x: f64, n: f64, p: f64, q: f64, log_p: bool) -> f64 {
      * -- following is much better for  x << n : */
     let lf = M_LN_2PI + x.ln() + (-x / n).ln_1p();
 
-    return R_D_exp!(log_p, lc - 0.5 * lf);
+    r_d_exp!(log_p, lc - 0.5 * lf)
 }
 
 pub fn rf_dnbinom_mu(x: f64, size: f64, mu: f64, log_p: bool) -> f64 {
@@ -196,23 +198,26 @@ pub fn rf_dnbinom_mu(x: f64, size: f64, mu: f64, log_p: bool) -> f64 {
         } else {
             (-mu / (size + mu)).ln_1p()
         };
-        return R_D_exp!(log_p, size * z);
+        return r_d_exp!(log_p, size * z);
     }
     if x < 1e-10 * size {
         /* don't use dbinom_raw() but MM's formula: */
-        /* FIXME --- 1e-8 shows problem; rather use algdiv() from ./toms708.c */
         let prob = if size < mu {
             (size / (1.0 + (size / mu))).ln()
         } else {
             (mu / (1.0 + (mu / size))).ln()
         };
-        return R_D_exp!(log_p, binom_sct(x, size, prob));
+        r_d_exp!(log_p, binom_sct(x, size, prob))
     } else {
         /* no unnecessary cancellation inside dbinom_raw, when
          * x_ = size and n_ = x+size are so close that n_ - x_ loses accuracy */
         let prob = size / (size + x);
         let ans = dbinom_raw(size, x + size, prob, 1.0 - prob, log_p);
-        return if log_p { prob.ln() + ans } else { prob * ans };
+        if log_p {
+            prob.ln() + ans
+        } else {
+            prob * ans
+        }
     }
 }
 
