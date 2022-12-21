@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 
-use nalgebra::{
-    DMatrix, DMatrixSlice, DVector, Dim, Dynamic, Matrix, OMatrix, Scalar, Storage, LU,
-};
+use nalgebra::{DMatrix, DMatrixSlice, DVector, Dim, Dynamic, Matrix, OMatrix, Scalar, Storage};
+use nalgebra_lapack::{LU, QR};
 use num_traits::Zero;
 
 use crate::math::rf_dnbinom_mu;
@@ -67,7 +66,7 @@ pub fn fit_beta(
             let x_wvec = multiply_each_column(&x, &w_sqrt_vec);
             let ridge_sqrt = ridge.map(f64::sqrt);
             let weighted_x_ridge = join_matrix_cols(&x_wvec, &ridge_sqrt);
-            let (q, r) = weighted_x_ridge.qr().unpack();
+            let (q, r) = QR::new(weighted_x_ridge).unpack();
 
             let mut big_w_diag = w_vec.clone();
             big_w_diag.resize_vertically_mut(y_m + x_p, 1.0);
@@ -210,27 +209,14 @@ fn get_weights(
     alpha_hat: DMatrixSlice<f64, Dynamic>,
 ) -> (DVector<f64>, DVector<f64>) {
     return if use_weights {
-        let w_vec = weights.row(i).transpose().component_mul(
-            &mu_hat.component_div(
-                &(alpha_hat
-                    .get(i)
-                    .expect("Unable to get alpha_hat value")
-                    .to_owned()
-                    * mu_hat)
-                    .add_scalar(1.0),
-            ),
-        );
+        let w_vec = weights
+            .row(i)
+            .transpose()
+            .component_mul(&mu_hat.component_div(&(alpha_hat[i] * mu_hat).add_scalar(1.0)));
         let w_sqrt_vec = w_vec.map(f64::sqrt);
         (w_vec, w_sqrt_vec)
     } else {
-        let w_vec = mu_hat.component_div(
-            &((alpha_hat
-                .get(i)
-                .expect("Unable to get alpha_hat value")
-                .to_owned()
-                * mu_hat)
-                .add_scalar(1.0)),
-        );
+        let w_vec = mu_hat.component_div(&((alpha_hat[i] * mu_hat).add_scalar(1.0)));
         let w_sqrt_vec = w_vec.map(f64::sqrt);
         (w_vec, w_sqrt_vec)
     };
